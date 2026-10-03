@@ -1,8 +1,8 @@
 {
   "name": "Pluggie Addons",
-  "url": "https://github.com/tiborgres/ha-pluggie",
-  "maintainer": "tiborgres <egresh@pluggie.net>",
+  "url": "https://github.com/pluggieio/ha-pluggie",
+  "maintainer": "Pluggie <support@pluggie.net>",
   "images": {
-    "docker-pluggie": "ghcr.io/tiborgres/ha-pluggie"
+    "docker-pluggie": "ghcr.io/pluggieio/ha-pluggie"
   }
 }

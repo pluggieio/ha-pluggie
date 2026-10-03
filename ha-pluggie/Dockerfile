@@ -60,12 +60,12 @@ LABEL \
     io.hass.name="Pluggie" \
     io.hass.description="Make your device visible!" \
     io.hass.type="addon" \
-    maintainer="egresh <https://github.com/tiborgres/ha-pluggie>" \
+    maintainer="Pluggie <support@pluggie.net>" \
     org.opencontainers.image.title="Pluggie" \
     org.opencontainers.image.description="Make your device visible! (Home Assistant Edition)" \
     org.opencontainers.image.vendor="Pluggie" \
-    org.opencontainers.image.authors="egresh <https://github.com/tiborgres/ha-pluggie>" \
+    org.opencontainers.image.authors="Pluggie <support@pluggie.net>" \
     org.opencontainers.image.licenses="MIT" \
     org.opencontainers.image.url="https://addons.community" \
-    org.opencontainers.image.source="https://github.com/tiborgres/ha-pluggie/ha-pluggie" \
-    org.opencontainers.image.documentation="https://github.com/tiborgres/ha-pluggie/README.md"
+    org.opencontainers.image.source="https://github.com/pluggieio/ha-pluggie" \
+    org.opencontainers.image.documentation="https://github.com/pluggieio/ha-pluggie/blob/master/README.md"

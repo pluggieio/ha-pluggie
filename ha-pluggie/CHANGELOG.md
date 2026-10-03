@@ -1,3 +1,12 @@
+## v0.6.1
+
+- move tiborgres --> pluggieio repo, maintainer support@pluggie.net, drop codenotary
+- replace https://pluggie.net links with https://pluggie.io
+
+- bump versions:
+  - cryptography 50.0.1 --> 50.0.2
+
+
 ## v0.6.0
 
 - more reliable tunnel health check, fewer unnecessary reconnects

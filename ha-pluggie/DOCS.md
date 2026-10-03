@@ -5,11 +5,11 @@
 
 1. Click on button to add Pluggie repository to your Home Assistant Add-On Store:
 
-   [![Open your Home Assistant instance and show the add add-on repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Ftiborgres%2Fha-pluggie)
+   [![Open your Home Assistant instance and show the add add-on repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fpluggieio%2Fha-pluggie)
 
    ..or add the Pluggie repository manually (Settings -> Add-ons -> Add-on Store -> Repositories):
    ```
-   https://github.com/tiborgres/ha-pluggie
+   https://github.com/pluggieio/ha-pluggie
    ```
 2. Check for updates and go into the Add-On Store
 3. Choose Pluggie Add-On
@@ -88,5 +88,5 @@ Elliptic Curve: secp256r1              # Optional: Curve for ECDSA keys (secp256
 
 ## Support
 
-- Got questions? Visit our website at [https://pluggie.net](https://pluggie.net)
+- Got questions? Visit our website at [https://pluggie.io](https://pluggie.io)
 - Need help? Contact our support team through support@pluggie.net
