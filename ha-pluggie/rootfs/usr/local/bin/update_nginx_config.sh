@@ -137,12 +137,13 @@ EOF
 HA_DEFAULT_HOST="http://${PLUGGIE_HA_HOST}:${PLUGGIE_HA_PORT}"
 PROXIED_HOST_FILE="/var/lib/wireguard/proxied_host"
 
-# Probe default port, then 80 (new Home Assistant OS installs since 2026.8); 401 on /api/ = Home Assistant
+# Probe default port, then 80 (new Home Assistant OS installs since 2026.8).
+# /manifest.json needs no auth (unlike /api/, which HA counts as a failed login); "Home Assistant" in body = HA
 _detect_ha_host() {
-    local port code
+    local port body
     for port in ${PLUGGIE_HA_PORT} 80; do
-        code=$(curl -s -m 2 -o /dev/null -w '%{http_code}' "http://${PLUGGIE_HA_HOST}:${port}/api/" 2>/dev/null)
-        if [ "${code}" = "401" ]; then
+        body=$(curl -s -m 2 "http://${PLUGGIE_HA_HOST}:${port}/manifest.json" 2>/dev/null)
+        if printf '%s' "${body}" | grep -q '"name": *"Home Assistant"'; then
             bashio::log.info "Home Assistant detected on port ${port}"
             echo "http://${PLUGGIE_HA_HOST}:${port}"
             return 0

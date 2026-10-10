@@ -1,3 +1,8 @@
+## v0.7.2
+
+- fix: Home Assistant port detection probes /manifest.json instead of /api/ (no more "invalid authentication" notifications in Home Assistant)
+
+
 ## v0.7.1
 
 - Home Assistant port detected at startup when Proxied Host is empty: 8123, then 80 (new Home Assistant OS installations since 2026.8); admin UI shows the detected address
