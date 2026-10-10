@@ -1,4 +1,4 @@
-# Pluggie Home Assistant Add-on
+# Pluggie Home Assistant App
 
 
 ## About

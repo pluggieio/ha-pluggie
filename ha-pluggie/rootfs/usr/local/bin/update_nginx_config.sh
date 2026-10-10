@@ -8,6 +8,8 @@ bashio::log.debug "Updating nginx configuration."
 # Read configuration from /data/pluggie.json
 PLUGGIE_HTTP_PORT=$(bashio::config 'pluggie_config.http_port' '54001')
 PLUGGIE_HTTPS_PORT=$(bashio::config 'pluggie_config.https_port' '54002')
+PLUGGIE_HTTPS_PROXY_PORT=$(bashio::config 'pluggie_config.https_proxy_port' '54003')
+PLUGGIE_EDGE_IP=$(bashio::config 'pluggie_config.endpoint1_ip_int')
 PLUGGIE_HOSTNAME=$(bashio::config 'pluggie_config.hostname' 'localhost')
 PLUGGIE_USERAGENT=$(bashio::config 'user_agent')
 DOMAIN=${PLUGGIE_HOSTNAME:-"localhost"}
@@ -19,6 +21,15 @@ DOMAIN=${PLUGGIE_HOSTNAME:-"localhost"}
 
 _is_uint() {
     [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+
+_is_ipv4() {
+    [[ "$1" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
+    local IFS=.
+    local octet
+    for octet in $1; do
+        [ $((10#${octet})) -le 255 ] || return 1
+    done
 }
 
 _is_dns_name() {
@@ -37,6 +48,22 @@ fi
 if ! _is_uint "${PLUGGIE_HTTPS_PORT}"; then
     bashio::log.warning "Invalid https_port, falling back to 54002"
     PLUGGIE_HTTPS_PORT=54002
+fi
+if ! _is_uint "${PLUGGIE_HTTPS_PROXY_PORT}" \
+   || [ "${PLUGGIE_HTTPS_PROXY_PORT}" = "${PLUGGIE_HTTPS_PORT}" ] \
+   || [ "${PLUGGIE_HTTPS_PROXY_PORT}" = "${PLUGGIE_HTTP_PORT}" ]; then
+    bashio::log.warning "Invalid https_proxy_port, falling back to 54003"
+    PLUGGIE_HTTPS_PROXY_PORT=54003
+fi
+PROXY_LISTEN=1
+if [ "${PLUGGIE_HTTPS_PROXY_PORT}" = "${PLUGGIE_HTTPS_PORT}" ] || [ "${PLUGGIE_HTTPS_PROXY_PORT}" = "${PLUGGIE_HTTP_PORT}" ]; then
+    bashio::log.warning "https_proxy_port collides with another port, PROXY protocol listener disabled"
+    PROXY_LISTEN=0
+fi
+REALIP=1
+if ! _is_ipv4 "${PLUGGIE_EDGE_IP}"; then
+    bashio::log.warning "Invalid endpoint1_ip_int, real client IP will not be restored"
+    REALIP=0
 fi
 
 HOSTNAME_VALID=1
@@ -158,9 +185,30 @@ if [ ${HOSTNAME_VALID} -eq 1 ] && [ ${PROXIED_VALID} -eq 1 ] \
     cat <<EOF > ${PLUGGIE_CONF}
 server {
     listen                        ${PLUGGIE_HTTPS_PORT} ssl;
+EOF
+
+    if [ ${PROXY_LISTEN} -eq 1 ]; then
+        cat <<EOF >> ${PLUGGIE_CONF}
+    listen                        ${PLUGGIE_HTTPS_PROXY_PORT} ssl proxy_protocol;
+EOF
+    fi
+
+    cat <<EOF >> ${PLUGGIE_CONF}
     server_name                   ${DOMAIN};
     ssl_certificate               ${CERT_DIR}/fullchain.pem;
     ssl_certificate_key           ${CERT_DIR}/privkey.pem;
+EOF
+
+    if [ ${REALIP} -eq 1 ]; then
+        cat <<EOF >> ${PLUGGIE_CONF}
+
+    # real client IP from the edge (PROXY protocol listener only)
+    set_real_ip_from              ${PLUGGIE_EDGE_IP};
+    real_ip_header                proxy_protocol;
+EOF
+    fi
+
+    cat <<EOF >> ${PLUGGIE_CONF}
 
     access_log off;
     error_log /dev/null;
@@ -211,7 +259,7 @@ EOF
         proxy_set_header          Host ${PROXIED_HOSTNAME};
         proxy_set_header          X-Real-IP \$remote_addr;
         proxy_set_header          X-Forwarded-Host ${PROXIED_HOSTNAME};
-        proxy_set_header          X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header          X-Forwarded-For \$remote_addr;
         proxy_set_header          X-Forwarded-Proto \$scheme;
         proxy_set_header          Upgrade \$http_upgrade;
         proxy_set_header          Connection \$connection_upgrade;

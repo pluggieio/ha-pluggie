@@ -84,6 +84,8 @@ def load_or_generate_keypair(pluggie_dir):
 
 
 DEFAULT_APISERVER = "api.pluggie.net"
+# capabilities announced to the apiserver (see tunnel capabilities)
+ADDON_CAPABILITIES = ["proxy_protocol"]
 
 
 def write_state(state):
@@ -98,7 +100,11 @@ def try_apiserver(api_server, access_key, public_key, user_agent,
         "Authorization": f"Bearer {access_key}",
         "User-Agent": user_agent,
     }
-    payload = {"access_key": access_key, "public_key": public_key}
+    payload = {
+        "access_key": access_key,
+        "public_key": public_key,
+        "capabilities": ADDON_CAPABILITIES,
+    }
 
     try:
         ping_url = f"https://{api_server}/api/ping"
@@ -294,6 +300,7 @@ def main():
             'certfile': config["certfile"],
             'http_port': config["http_port"],
             'https_port': config["https_port"],
+            'https_proxy_port': config.get("https_proxy_port", 54003),
             'dns': config["dns"],
             'endpoint1_short': endpoint1_short,
             'endpoint1_ip': endpoint1_ip,

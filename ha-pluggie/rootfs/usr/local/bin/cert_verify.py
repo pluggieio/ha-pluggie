@@ -28,6 +28,8 @@ CERT_VERIFY_FILE = "/tmp/cert_verify.json"
 VERIFY_INTERVAL = 3600  # 1 hour
 INITIAL_DELAY = 120  # 2 minutes after startup
 TRIGGER_FILE = "/tmp/cert_verify_trigger"
+CERT_BUSY_FILE = "/tmp/pluggie_cert_busy"
+CERT_BUSY_MAX_AGE = 600  # ignore stale marker
 
 _wakeup_event = threading.Event()
 
@@ -160,6 +162,15 @@ def _get_remote_cert_fingerprint(hostname, ip_addr, port=443):
         return None
 
 
+def _cert_issuance_in_progress():
+    """Return True while letsencrypt/run is issuing the certificate."""
+    try:
+        age = time.time() - os.path.getmtime(CERT_BUSY_FILE)
+    except OSError:
+        return False
+    return age < CERT_BUSY_MAX_AGE
+
+
 def _get_local_cert_fingerprint(hostname):
     """
     Read the local Let's Encrypt certificate and return its SHA-256
@@ -284,6 +295,12 @@ def run_verification():
                     f"Addon state is '{state}', skipping verification"
                 )
                 return result
+
+        # Local cert or nginx may not be ready yet
+        if _cert_issuance_in_progress():
+            result["status"] = "pending"
+            result["error"] = "Certificate is being issued"
+            return result
 
         # Step 1: resolve hostname via DoH
         ip_addr = _resolve_hostname_doh(hostname)

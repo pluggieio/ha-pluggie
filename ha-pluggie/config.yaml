@@ -1,5 +1,5 @@
 name: Pluggie
-version: 0.6.1
+version: 0.7.0
 slug: pluggie
 description: Make your device visible! (Pluggie)
 url: https://pluggie.io
@@ -36,7 +36,7 @@ map:
 - ssl:rw
 panel_icon: mdi:connection
 options:
-  message: Enable the sidebar icon and click on Pluggie to access all addon settings.
-    Nothing to configure here.
+  message: Turn on 'Show in sidebar' and click on Pluggie in the sidebar to access
+    all app settings. Nothing to configure here.
 schema:
   message: str

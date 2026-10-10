@@ -1,5 +1,5 @@
 {
   "configuration": {
-    "addon_empty_config": "All addon settings are configured through the sidebar (ingress). Please click on the Pluggie icon in the sidebar to open the configuration page."
+    "addon_empty_config": "All app settings are configured on the Pluggie sidebar page (ingress). Turn on \"Show in sidebar\" on the app page, then click on the Pluggie icon in the sidebar to open the configuration page."
   }
 }

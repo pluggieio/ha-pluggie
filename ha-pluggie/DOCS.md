@@ -1,36 +1,46 @@
-# Home Assistant Add-On: Pluggie
+# Home Assistant App: Pluggie
 
 
 ## Installation
 
-1. Click on button to add Pluggie repository to your Home Assistant Add-On Store:
+1. Click on button to add Pluggie repository to your Home Assistant:
 
-   [![Open your Home Assistant instance and show the add add-on repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fpluggieio%2Fha-pluggie)
+   [![Open your Home Assistant instance and show the add app repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fpluggieio%2Fha-pluggie)
 
-   ..or add the Pluggie repository manually (Settings -> Add-ons -> Add-on Store -> Repositories):
+   ..or add the Pluggie repository manually (Settings -> Apps -> Install app -> ⋮ (top right) -> Repositories):
    ```
    https://github.com/pluggieio/ha-pluggie
    ```
-2. Check for updates and go into the Add-On Store
-3. Choose Pluggie Add-On
+2. Check for updates (⋮ menu, top right) and reload the Install app page
+3. Choose the Pluggie app
 4. Click on the INSTALL button
 
 
 ### One-Time Setup
 
-1. Edit your Home Assistant's `configuration.yaml` file and add/update:
+1. On the Pluggie app page, turn on "Show in sidebar" and click START
+2. Let Home Assistant trust Pluggie as a reverse proxy.
+
+   **Home Assistant 2026.8 or newer:** go to Settings -> System -> Network -> HTTP server and set:
+   - "Trust X-Forwarded-For": on
+   - "Trusted proxies": `172.30.32.0/23`
+
+   Save the settings. Home Assistant restarts; afterwards confirm the new settings, otherwise Home Assistant reverts them after 5 minutes.
+
+   **Older versions:** add/update this in your `configuration.yaml` and restart Home Assistant:
    ```yaml
    http:
-      use_x_forwarded_for: true
-      trusted_proxies:
-        - 172.30.32.0/23  # Pluggie Add-On
+     use_x_forwarded_for: true
+     trusted_proxies:
+       - 172.30.32.0/23  # Pluggie app
    ```
-2. Enable Sidebar for Configuration page
-3. Start the Add-On
-4. Restart Home Assistant to apply `configuration.yaml` changes and to enable Sidebar view
-5. After Home Assistant Restart - Set the "Access Key" and other settings on Pluggie Sidebar page
-6. Check the Add-On status in Log output
-7. Test the connection by opening your browser and navigating to your chosen generated domain name:
+
+   Upgrading to 2026.8 or newer imports an existing `http:` block automatically on first start. Afterwards remove the `http:` block from `configuration.yaml` (Home Assistant shows a repair; the YAML configuration stops working in 2027.2.0).
+
+   Home Assistant sees the real client IP address, so login attempt notifications show the real client and you can also turn on "Enable IP banning" in the same HTTP server settings.
+3. Open Pluggie from the sidebar and set the "Access Key" and other settings
+4. Check the app status in the Log tab
+5. Test the connection by opening your browser and navigating to your chosen generated domain name:
    ```
    https://generated-domain-name.pluggie.net
    ```

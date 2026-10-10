@@ -648,8 +648,8 @@
 
                 if (data.status === 'config_required') {
                     if (data.is_ha_addon) {
-                        warningMessage.innerHTML = 'Home Assistant returned <strong>400 Bad Request</strong>. You need to add <code>trusted_proxies</code> configuration.';
-                        warningHint.innerHTML = 'Add the following to your <code>configuration.yaml</code> and restart Home Assistant:<br><code style="white-space: pre;">http:\n  use_x_forwarded_for: true\n  trusted_proxies:\n    - 172.30.32.0/23</code>';
+                        warningMessage.innerHTML = 'Home Assistant returned <strong>400 Bad Request</strong>. You need to add Pluggie to the trusted proxies in Home Assistant.';
+                        warningHint.innerHTML = 'Home Assistant 2026.8 or newer: go to <strong>Settings &gt; System &gt; Network &gt; HTTP server</strong>, turn on <strong>Trust X-Forwarded-For</strong>, add <code>172.30.32.0/23</code> to <strong>Trusted proxies</strong> and save. Home Assistant restarts; confirm the new settings afterwards, otherwise they are reverted after 5 minutes.<br>Older versions: add the following to your <code>configuration.yaml</code> and restart Home Assistant:<br><code style="white-space: pre;">http:\n  use_x_forwarded_for: true\n  trusted_proxies:\n    - 172.30.32.0/23</code>';
                     } else {
                         warningMessage.innerHTML = 'Your proxied host returned <strong>400 Bad Request</strong>. The target server may need to be configured to accept connections from Pluggie.';
                         warningHint.textContent = 'Check your web server configuration and add the Pluggie server IP to the list of trusted proxies.';
@@ -1273,7 +1273,10 @@
                     updateCertPath(data);
                 } else if (data.status === 'pending') {
                     icon.innerHTML = '<i class="ti ti-clock text-muted" style="font-size: 1.3rem;"></i>';
-                    text.innerHTML = '<span class="text-muted">Verification pending – first check will run shortly</span>';
+                    const pendingMsg = data.error
+                        ? 'Certificate is being issued – verification will run automatically'
+                        : 'Verification pending – first check will run shortly';
+                    text.innerHTML = '<span class="text-muted">' + pendingMsg + '</span>';
                     details.style.display = 'none';
                 } else if (data.status === 'skipped') {
                     icon.innerHTML = '<i class="ti ti-minus text-muted" style="font-size: 1.3rem;"></i>';

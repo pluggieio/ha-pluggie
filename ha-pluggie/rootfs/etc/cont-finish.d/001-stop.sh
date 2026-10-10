@@ -47,6 +47,7 @@ jq '.pluggie_config = (.pluggie_config // {}) |
     del(.pluggie_config.certfile) |
     del(.pluggie_config.http_port) |
     del(.pluggie_config.https_port) |
+    del(.pluggie_config.https_proxy_port) |
     del(.pluggie_config.endpoint1_short) |
     del(.pluggie_config.endpoint1_ip) |
     del(.pluggie_config.endpoint1_ip_int)' "${ADDON_OPTIONS}" > "${temp_file}" && mv "${temp_file}" "${ADDON_OPTIONS}"

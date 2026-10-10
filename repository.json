@@ -3,6 +3,6 @@
   "url": "https://github.com/pluggieio/ha-pluggie",
   "maintainer": "Pluggie <support@pluggie.net>",
   "images": {
-    "docker-pluggie": "ghcr.io/pluggieio/ha-pluggie"
+    "ha-pluggie": "ghcr.io/pluggieio/ha-pluggie"
   }
 }

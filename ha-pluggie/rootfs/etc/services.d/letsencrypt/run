@@ -153,6 +153,11 @@ else
   bashio::log.debug "All DNS records for ${HNAMES} valid."
 fi
 
+# Tell cert_verify.py that certificate issuance is in progress
+CERT_BUSY_FILE=/tmp/pluggie_cert_busy
+touch "${CERT_BUSY_FILE}"
+trap 'rm -f /tmp/pluggie_cert_busy' EXIT
+
 
 # Gather all domains into a plaintext file
 DOMAIN_ARR=()
@@ -274,5 +279,9 @@ else
     bashio::log.debug "Starting NGINX with new configuration"
     nginx -c /etc/nginx/nginx.conf
 fi
+
+# Cert and nginx are in sync, run verification now
+rm -f "${CERT_BUSY_FILE}"
+touch /tmp/cert_verify_trigger
 
 bashio::log.info "Pluggie started."

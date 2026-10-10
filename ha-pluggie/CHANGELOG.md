@@ -1,3 +1,11 @@
+## v0.7.0
+
+- Home Assistant now sees the real client IP instead of the Pluggie endpoint IP; login notifications and IP banning work per client
+- X-Forwarded-For sent by clients is no longer passed through
+- docs: setup for Home Assistant 2026.8+ (HTTP server settings in the UI)
+- mark cert verification pending during issuance and re-run it when letsencrypt finishes
+
+
 ## v0.6.1
 
 - move tiborgres --> pluggieio repo, maintainer support@pluggie.net, drop codenotary
