@@ -1,3 +1,10 @@
+## v0.7.1
+
+- Home Assistant port detected at startup when Proxied Host is empty: 8123, then 80 (new Home Assistant OS installations since 2026.8); admin UI shows the detected address
+- 400 page and admin UI link to the step-by-step trusted proxy guide
+- docs: link to the guide
+
+
 ## v0.7.0
 
 - Home Assistant now sees the real client IP instead of the Pluggie endpoint IP; login notifications and IP banning work per client

@@ -61,6 +61,21 @@ def validate_url(url):
         return False, f"Invalid URL: {str(e)}"
 
 
+# PLUGGIE_HA_HOST / PLUGGIE_HA_PORT are set by 005-config.sh (s6 container environment)
+HA_DEFAULT_PROXIED_HOST = f"http://{os.environ['PLUGGIE_HA_HOST']}:{os.environ['PLUGGIE_HA_PORT']}"
+PROXIED_HOST_FILE = "/var/lib/wireguard/proxied_host"
+
+
+def _read_detected_proxied_host():
+    # Written by update_nginx_config.sh after probing Home Assistant ports
+    try:
+        with open(PROXIED_HOST_FILE, "r") as f:
+            value = f.read().strip()
+    except OSError:
+        return ""
+    return value if value.startswith("http") else ""
+
+
 _ALLOWED_TOP_LEVEL_KEYS = frozenset({
     'proxied_host',
     'basic_auth_username',
@@ -359,7 +374,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     # If no proxied_host configured, use default for HA addon
                     if not proxied_host or proxied_host.strip() == '':
                         if is_ha_addon:
-                            proxied_host = "http://homeassistant.local.hass.io:8123"
+                            proxied_host = HA_DEFAULT_PROXIED_HOST
                         else:
                             # Docker without proxied_host - nothing to check
                             self._set_headers()
@@ -369,6 +384,12 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                                 "check_performed": False
                             }).encode())
                             return
+
+                    # Default HA host may have been detected on another port by update_nginx_config.sh
+                    auto_detected = False
+                    if is_ha_addon and proxied_host == HA_DEFAULT_PROXIED_HOST:
+                        proxied_host = _read_detected_proxied_host() or proxied_host
+                        auto_detected = True
 
                     # Perform the check
                     try:
@@ -388,6 +409,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                             self.wfile.write(json.dumps({
                                 "status": "config_required",
                                 "message": "Proxied host returned 400 Bad Request. Configuration may be required.",
+                                "proxied_host": proxied_host,
+                                "auto_detected": auto_detected,
                                 "http_status": 400,
                                 "is_ha_addon": is_ha_addon,
                                 "check_performed": True
@@ -398,6 +421,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                             self.wfile.write(json.dumps({
                                 "status": "ok",
                                 "message": "Proxied host is reachable",
+                                "proxied_host": proxied_host,
+                                "auto_detected": auto_detected,
                                 "http_status": response.status_code,
                                 "check_performed": True
                             }).encode())
@@ -409,6 +434,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         self.wfile.write(json.dumps({
                             "status": "connection_error",
                             "message": "Cannot connect to proxied host",
+                            "proxied_host": proxied_host,
+                            "auto_detected": auto_detected,
                             "check_performed": True
                         }).encode())
 

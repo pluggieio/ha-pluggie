@@ -38,6 +38,8 @@
    Upgrading to 2026.8 or newer imports an existing `http:` block automatically on first start. Afterwards remove the `http:` block from `configuration.yaml` (Home Assistant shows a repair; the YAML configuration stops working in 2027.2.0).
 
    Home Assistant sees the real client IP address, so login attempt notifications show the real client and you can also turn on "Enable IP banning" in the same HTTP server settings.
+
+   Step-by-step guide with troubleshooting: https://pluggie.io/blog/home-assistant-trusted-proxies
 3. Open Pluggie from the sidebar and set the "Access Key" and other settings
 4. Check the app status in the Log tab
 5. Test the connection by opening your browser and navigating to your chosen generated domain name:
@@ -82,7 +84,7 @@ Elliptic Curve: secp256r1              # Optional: Curve for ECDSA keys (secp256
 - `Log Level`: Controls the detail level of logging. Use 'debug' for troubleshooting, 'info' for normal operation.
 
 **Network**
-- `Proxied Host`: URL of your Home Assistant (default) or web enabled device to connect to (e.g. https://myrouter.internal:8080)
+- `Proxied Host`: URL of your Home Assistant (default) or web enabled device to connect to (e.g. https://myrouter.internal:8080). If Home Assistant listens on another port (new Home Assistant OS installations since 2026.8 use port 80), set e.g. `http://homeassistant.local.hass.io` (no port).
 
 **Security**
 - `Basic Authentication Username`: Optional username for Basic Auth protection. If set along with password, will enable Basic Auth.

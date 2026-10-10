@@ -7,6 +7,12 @@ declare post_down1
 declare addon_version
 declare is_ha_environment
 
+# Home Assistant default proxied host (HA edition); exported for other scripts and admin_api.py
+PLUGGIE_HA_HOST="homeassistant.local.hass.io"
+PLUGGIE_HA_PORT=8123
+printf '%s' "${PLUGGIE_HA_HOST}" > /run/s6/container_environment/PLUGGIE_HA_HOST
+printf '%s' "${PLUGGIE_HA_PORT}" > /run/s6/container_environment/PLUGGIE_HA_PORT
+
 log_level=$(bashio::config 'log_level' 'info')
 bashio::log.level "${log_level}"
 export LOG_LEVEL=$(bashio::config 'log_level' 'info')
@@ -46,7 +52,8 @@ if ! bashio::fs.file_exists "${ADDON_OPTIONS}"; then
     bashio::log.debug "Creating new pluggie.json file with default configuration"
 
     if [ "${is_ha_environment}" = true ]; then
-        proxied_host="http://homeassistant.local.hass.io:8123"
+        # empty = Home Assistant, port auto-detected by update_nginx_config.sh
+        proxied_host=""
     else
         proxied_host="http://localhost:8080"
     fi

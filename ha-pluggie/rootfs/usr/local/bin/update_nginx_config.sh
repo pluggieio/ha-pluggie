@@ -134,11 +134,29 @@ server {
 }
 EOF
 
+HA_DEFAULT_HOST="http://${PLUGGIE_HA_HOST}:${PLUGGIE_HA_PORT}"
+PROXIED_HOST_FILE="/var/lib/wireguard/proxied_host"
+
+# Probe default port, then 80 (new Home Assistant OS installs since 2026.8); 401 on /api/ = Home Assistant
+_detect_ha_host() {
+    local port code
+    for port in ${PLUGGIE_HA_PORT} 80; do
+        code=$(curl -s -m 2 -o /dev/null -w '%{http_code}' "http://${PLUGGIE_HA_HOST}:${port}/api/" 2>/dev/null)
+        if [ "${code}" = "401" ]; then
+            bashio::log.info "Home Assistant detected on port ${port}"
+            echo "http://${PLUGGIE_HA_HOST}:${port}"
+            return 0
+        fi
+    done
+    bashio::log.warning "Home Assistant not detected on port ${PLUGGIE_HA_PORT} or 80, using ${HA_DEFAULT_HOST}"
+    echo "${HA_DEFAULT_HOST}"
+}
+
 PROXIED_HOST=$(bashio::config 'proxied_host')
 if [ -z "$PROXIED_HOST" ]; then
     if [ "$PLATFORM" = "ha-pluggie" ]; then
         bashio::log.debug "Home Assistant Pluggie detected, using default proxied_host"
-        PROXIED_HOST="http://homeassistant.local.hass.io:8123"
+        PROXIED_HOST="${HA_DEFAULT_HOST}"
     else
         bashio::log.debug "Empty proxied_host, skipping HTTPS configuration"
 
@@ -148,6 +166,11 @@ if [ -z "$PROXIED_HOST" ]; then
         fi
     fi
 fi
+
+if [ "$PLATFORM" = "ha-pluggie" ] && [ "${PROXIED_HOST}" = "${HA_DEFAULT_HOST}" ]; then
+    PROXIED_HOST=$(_detect_ha_host)
+fi
+echo "${PROXIED_HOST}" > "${PROXIED_HOST_FILE}"
 
 # No basic_auth allowed if proxied_host = HA URL
 IS_HOMEASSISTANT=0

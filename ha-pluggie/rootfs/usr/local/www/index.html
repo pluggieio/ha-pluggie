@@ -506,6 +506,7 @@
                                             <label class="form-label">Proxied Host</label>
                                             <input type="text" class="form-control" id="proxied_host" name="proxied_host" placeholder="loading...">
                                             <div id="proxiedHostError" class="invalid-feedback"></div>
+                                            <small class="form-hint" id="proxied-host-detected" style="display: none;"></small>
                                             <small class="form-hint">URL of the host to proxy through the tunnel (e.g. http://localhost:8080)</small>
                                         </div>
 
@@ -642,6 +643,16 @@
                 const response = await fetch('./pluggie/api/proxy-check');
                 const data = await response.json();
 
+                const detectedHint = document.getElementById('proxied-host-detected');
+                if (detectedHint) {
+                    if (data.auto_detected && data.proxied_host) {
+                        detectedHint.textContent = 'Auto-detected: ' + data.proxied_host;
+                        detectedHint.style.display = 'block';
+                    } else {
+                        detectedHint.style.display = 'none';
+                    }
+                }
+
                 const warningDiv = document.getElementById('proxy-warning');
                 const warningMessage = document.getElementById('proxy-warning-message');
                 const warningHint = document.getElementById('proxy-warning-hint');
@@ -649,10 +660,10 @@
                 if (data.status === 'config_required') {
                     if (data.is_ha_addon) {
                         warningMessage.innerHTML = 'Home Assistant returned <strong>400 Bad Request</strong>. You need to add Pluggie to the trusted proxies in Home Assistant.';
-                        warningHint.innerHTML = 'Home Assistant 2026.8 or newer: go to <strong>Settings &gt; System &gt; Network &gt; HTTP server</strong>, turn on <strong>Trust X-Forwarded-For</strong>, add <code>172.30.32.0/23</code> to <strong>Trusted proxies</strong> and save. Home Assistant restarts; confirm the new settings afterwards, otherwise they are reverted after 5 minutes.<br>Older versions: add the following to your <code>configuration.yaml</code> and restart Home Assistant:<br><code style="white-space: pre;">http:\n  use_x_forwarded_for: true\n  trusted_proxies:\n    - 172.30.32.0/23</code>';
+                        warningHint.innerHTML = 'Home Assistant 2026.8 or newer: go to <strong>Settings &gt; System &gt; Network &gt; HTTP server</strong>, turn on <strong>Trust X-Forwarded-For</strong>, add <code>172.30.32.0/23</code> to <strong>Trusted proxies</strong> and save. Home Assistant restarts; confirm the new settings afterwards, otherwise they are reverted after 5 minutes. <a href="https://pluggie.io/blog/home-assistant-trusted-proxies#ha-2026-8" target="_blank" rel="noopener">Step-by-step guide</a><br>Older versions: add the following to your <code>configuration.yaml</code> and restart Home Assistant:<br><code style="white-space: pre;">http:\n  use_x_forwarded_for: true\n  trusted_proxies:\n    - 172.30.32.0/23</code>';
                     } else {
                         warningMessage.innerHTML = 'Your proxied host returned <strong>400 Bad Request</strong>. The target server may need to be configured to accept connections from Pluggie.';
-                        warningHint.textContent = 'Check your web server configuration and add the Pluggie server IP to the list of trusted proxies.';
+                        warningHint.innerHTML = 'Check your web server configuration and add the Pluggie server IP to the list of trusted proxies. Proxying Home Assistant? <a href="https://pluggie.io/blog/home-assistant-trusted-proxies#docker" target="_blank" rel="noopener">Step-by-step guide</a>';
                     }
                     warningDiv.style.display = 'block';
                 } else if (data.status === 'connection_error') {
@@ -947,7 +958,7 @@
                         if (isDockerPluggie) {
                             proxiedHostInput.placeholder = "http://localhost:8080";
                         } else {
-                            proxiedHostInput.placeholder = "http://homeassistant.local.hass.io:8123";
+                            proxiedHostInput.placeholder = "Leave empty for Home Assistant (auto-detected)";
                         }
                     }
 
