@@ -33,6 +33,14 @@ profile pluggie flags=(attach_disconnected,mediate_deleted) {
   /var/lib/wireguard/ rwk,
   /var/lib/wireguard/** rwk,
 
+  # Client certificates (mTLS), mtls.py
+  /data/mtls/ rwk,
+  /data/mtls/** rwk,
+
+  # Unreported probe bytes, cert_verify.py
+  /data/cert_verify_overhead.json rwk,
+  /data/cert_verify_overhead.json.tmp rwk,
+
   # From 010-letsencrypt.sh
   /var/log/letsencrypt/ rwk,
   /var/log/letsencrypt/** rwk,

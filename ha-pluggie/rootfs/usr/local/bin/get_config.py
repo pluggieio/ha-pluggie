@@ -7,6 +7,8 @@ import requests
 import socket
 import logging
 import json
+import re
+import time
 
 from wireguard_tools import WireguardKey
 from logger import setup_logging, get_logger
@@ -85,7 +87,13 @@ def load_or_generate_keypair(pluggie_dir):
 
 DEFAULT_APISERVER = "api.pluggie.net"
 # capabilities announced to the apiserver (see tunnel capabilities)
-ADDON_CAPABILITIES = ["proxy_protocol"]
+ADDON_CAPABILITIES = ["proxy_protocol", "mtls", "doorbell"]
+OPTIONS_FILE = "/data/pluggie.json"
+CONFIG_CHECK_STAMP = "/tmp/pluggie_config_check"
+CONFIG_REFRESH_TRIGGER = "/tmp/pluggie_config_refresh"
+COMMANDS_PULL_REQUEST = "/tmp/pluggie_commands_pull"
+CHECK_EXIT_CODES = {"current": 0, "unknown": 1, "changed": 3, "throttled": 4}
+_HOSTNAME_RE = re.compile(r"\A[a-z0-9.-]{1,253}\Z")
 
 
 def write_state(state):
@@ -93,8 +101,97 @@ def write_state(state):
         f.write(state)
 
 
+def _host(value):
+    if not isinstance(value, str):
+        return ""
+    value = value.strip().rstrip(".").lower()
+    return value if _HOSTNAME_RE.match(value) else ""
+
+
+def request_config_refresh():
+    """Ask check_and_restart_wg.sh to refresh the configuration."""
+    with open(CONFIG_REFRESH_TRIGGER, "a"):
+        pass
+
+
+def check_remote_config(min_interval=0, now=None):
+    """Compare hostname and endpoint in pluggie.json with GET /api/settings.
+
+    Returns "changed" (refresh requested), "current", "throttled" or
+    "unknown". GET does not touch the edge, unlike the POST in main().
+    """
+    now = time.time() if now is None else now
+    if min_interval:
+        try:
+            if 0 <= now - os.path.getmtime(CONFIG_CHECK_STAMP) < min_interval:
+                return "throttled"
+        except OSError:
+            pass
+    try:
+        with open(CONFIG_CHECK_STAMP, "a"):
+            pass
+        os.utime(CONFIG_CHECK_STAMP, (now, now))
+    except OSError:
+        pass
+
+    try:
+        with open(OPTIONS_FILE, "r") as f:
+            options = json.load(f)
+        local = options.get("pluggie_config") or {}
+        access_key = (options.get("configuration") or {}).get("access_key")
+        api_server = local.get("apiserver") or DEFAULT_APISERVER
+        user_agent = options.get("user_agent", "Pluggie-Client-Docker/Default")
+    except (OSError, ValueError, AttributeError) as e:
+        logging.debug(f"Config check: cannot read options: {type(e).__name__}")
+        return "unknown"
+    if not access_key or access_key == "XXXXX":
+        return "unknown"
+
+    try:
+        response = requests.get(
+            f"https://{api_server}/api/settings",
+            headers={"Authorization": f"Bearer {access_key}",
+                     "User-Agent": user_agent},
+            timeout=10,
+        )
+        remote = response.json().get("client_tunnel_settings") \
+            if response.status_code == 200 else None
+    except (requests.exceptions.RequestException, ValueError,
+            AttributeError) as e:
+        logging.debug(f"Config check failed: {type(e).__name__}")
+        return "unknown"
+    if not isinstance(remote, dict):
+        logging.debug(f"Config check: HTTP {response.status_code}")
+        return "unknown"
+
+    remote_hostname = _host(remote.get("hostname"))
+    remote_endpoint = _host(str(remote.get("endpoint1") or "")
+                            .rsplit(":", 1)[0])
+    local_endpoint = _host(local.get("endpoint1_short"))
+    changes = []
+    if remote_hostname and remote_hostname != _host(local.get("hostname")):
+        changes.append(f"hostname {_host(local.get('hostname')) or '-'} "
+                       f"-> {remote_hostname}")
+    if local_endpoint and remote_endpoint not in ("", local_endpoint):
+        changes.append(f"endpoint {local_endpoint} -> {remote_endpoint}")
+    if not changes:
+        return "current"
+    logging.warning(f"Tunnel settings changed in the Pluggie account "
+                    f"({', '.join(changes)}), refreshing configuration")
+    request_config_refresh()
+    return "changed"
+
+
 def try_apiserver(api_server, access_key, public_key, user_agent,
                   interface1, timeout=10):
+    # One connection (one TLS handshake) for ping, POST and GET
+    with requests.Session() as session:
+        return _try_apiserver(session, api_server, access_key, public_key,
+                              user_agent, interface1, timeout)
+
+
+def _try_apiserver(session, api_server, access_key, public_key, user_agent,
+                   interface1, timeout):
     api_url = f"https://{api_server}/api/settings"
     headers = {
         "Authorization": f"Bearer {access_key}",
@@ -108,7 +205,7 @@ def try_apiserver(api_server, access_key, public_key, user_agent,
 
     try:
         ping_url = f"https://{api_server}/api/ping"
-        ping_response = requests.head(ping_url, headers=headers, timeout=5)
+        ping_response = session.head(ping_url, headers=headers, timeout=5)
         connectivity_ok = ping_response.status_code < 500
     except requests.exceptions.RequestException:
         connectivity_ok = False
@@ -117,8 +214,8 @@ def try_apiserver(api_server, access_key, public_key, user_agent,
         )
 
     try:
-        response = requests.post(api_url, headers=headers, json=payload,
-                                 timeout=timeout)
+        response = session.post(api_url, headers=headers, json=payload,
+                                timeout=timeout)
 
         if response.status_code == 200:
             logging.debug(f"Public Key upload to {api_server} succeeded")
@@ -177,7 +274,7 @@ def try_apiserver(api_server, access_key, public_key, user_agent,
         return "connectivity", None
 
     try:
-        response = requests.get(api_url, headers=headers, timeout=timeout)
+        response = session.get(api_url, headers=headers, timeout=timeout)
         response.raise_for_status()
         data = response.json()
     except requests.exceptions.RequestException as e:
@@ -191,7 +288,15 @@ def main():
     logger = setup_logging()
 
     parser = argparse.ArgumentParser("get_config.py")
-    parser.parse_args()
+    parser.add_argument("--check", action="store_true",
+                        help="only compare hostname and endpoint with the "
+                             "apiserver (exit 0 current, 3 changed, "
+                             "4 throttled, 1 unknown)")
+    parser.add_argument("--min-interval", type=int, default=0)
+    args = parser.parse_args()
+
+    if args.check:
+        sys.exit(CHECK_EXIT_CODES[check_remote_config(args.min_interval)])
 
     options = load_options()
 
@@ -334,6 +439,20 @@ def main():
             f"PersistentKeepalive = {config['keep_alive']}"
         ]
         f.write('\n'.join(wg_config))
+
+    # Fresh config: the next check may run at once
+    try:
+        os.remove(CONFIG_CHECK_STAMP)
+    except OSError:
+        pass
+
+    # Commands may have been missed while disconnected: fetch once
+    try:
+        if not os.path.exists(COMMANDS_PULL_REQUEST):
+            with open(COMMANDS_PULL_REQUEST, "w") as f:
+                f.write("0")
+    except OSError:
+        pass
 
     logging.debug("Configuration files updated successfully.")
 

@@ -97,6 +97,12 @@ map \$http_upgrade \$connection_upgrade {
 }
 EOF
 
+# HA edition: admin interface only for the ingress proxy and loopback
+ADMIN_ACCESS=""
+if [[ -n "${SUPERVISOR_TOKEN:-}" ]]; then
+    ADMIN_ACCESS="include /etc/nginx/pluggie-admin-ha.conf;"
+fi
+
 cat <<EOF > ${NGINX_CONF}
 server {
     listen ${PLUGGIE_HTTP_PORT} default_server;
@@ -120,6 +126,7 @@ server {
     listen 8099 default_server;
     root /usr/local/www;
     index index.html;
+    ${ADMIN_ACCESS}
 
     access_log off;
     error_log /dev/null;
@@ -204,6 +211,22 @@ if [ "${PROXIED_PROTOCOL}" != "http" ] && [ "${PROXIED_PROTOCOL}" != "https" ]; 
     PROXIED_VALID=0
 fi
 
+# Client certificates (mTLS): snippets must exist before pluggie.conf includes them
+MTLS_SNIPPET_DIR="/etc/nginx/pluggie-mtls"
+if ! MTLS_MODE=$(/usr/local/bin/mtls.py render) || [ -z "${MTLS_MODE}" ]; then
+    bashio::log.warning "Could not render client certificate (mTLS) configuration, client certificates disabled"
+    MTLS_MODE="off"
+    mkdir -p "${MTLS_SNIPPET_DIR}"
+    cat <<'EOF' > /etc/nginx/http.d/pluggie-mtls-map.conf
+map "$ssl_client_verify:$ssl_client_fingerprint" $pluggie_mtls_ok {
+    default 0;
+}
+log_format pluggie_mtls '$time_iso8601 $ssl_client_fingerprint';
+EOF
+    echo "access_log off;" > "${MTLS_SNIPPET_DIR}/server.conf"
+    : > "${MTLS_SNIPPET_DIR}/location.conf"
+fi
+
 if [ ${HOSTNAME_VALID} -eq 1 ] && [ ${PROXIED_VALID} -eq 1 ] \
    && [ -f "${CERT_DIR}/fullchain.pem" ] && [ -f "${CERT_DIR}/privkey.pem" ]; then
     cat <<EOF > ${PLUGGIE_CONF}
@@ -234,8 +257,10 @@ EOF
 
     cat <<EOF >> ${PLUGGIE_CONF}
 
-    access_log off;
     error_log /dev/null;
+
+    # access_log and client certificate (mTLS) settings for the current mode
+    include                       ${MTLS_SNIPPET_DIR}/server.conf;
 
     # Intercept proxy errors to show helpful error pages
     proxy_intercept_errors on;
@@ -248,6 +273,8 @@ EOF
 
     # Basic location block
     location / {
+        include                   ${MTLS_SNIPPET_DIR}/location.conf;
+
 EOF
 
     if [ ${IS_HOMEASSISTANT} -eq 0 ] && bashio::config.has_value "basic_auth_username" && bashio::config.has_value "basic_auth_password"; then
@@ -313,6 +340,16 @@ EOF
     bashio::log.debug "HTTPS configuration created successfully"
 else
     bashio::log.warning "SSL certificates not found. Skipping HTTPS configuration"
+fi
+
+if [ "${MTLS_MODE}" != "off" ] && ! nginx -t -q >/dev/null 2>&1; then
+    /usr/local/bin/mtls.py render --off >/dev/null
+    if nginx -t -q >/dev/null 2>&1; then
+        bashio::log.warning "nginx rejected the client certificate (mTLS) configuration, switching client certificates off"
+        /usr/local/bin/mtls.py disable >/dev/null
+    else
+        /usr/local/bin/mtls.py render >/dev/null
+    fi
 fi
 
 bashio::log.debug "NGINX configuration updated successfully"

@@ -9,7 +9,14 @@ sleep_time=30
 if [ -f /tmp/pluggie_health ] && [ "$(cut -d' ' -f2 /tmp/pluggie_health)" = "1" ]; then
     sleep_time=10
 fi
-sleep "${sleep_time}"
+# Wake up early for a configuration refresh requested since the last check
+# (doorbell, command fetch); an unconsumed older request does not spin
+loop_mark=/tmp/pluggie_status_loop
+for ((i = 0; i < sleep_time; i++)); do
+    [ /tmp/pluggie_config_refresh -nt "${loop_mark}" ] && break
+    sleep 1
+done
+touch "${loop_mark}"
 
 log_level=$(bashio::config 'log_level' 'info')
 bashio::log.level "${log_level}"
@@ -20,6 +27,27 @@ bashio::log.debug "Requesting current status from Wireguard."
 # Also check the Access Key validity
 if [ -f "/etc/pluggie.state" ] && [ "$(cat /etc/pluggie.state)" != "invalid_key" ]; then
     /usr/local/bin/check_and_restart_wg.sh
+fi
+
+# Commands from the Pluggie account (remote mTLS disable, configuration
+# refresh) arrive by doorbell; fetched here only after start or reconnect,
+# after an mTLS mode change, while an ack is pending, or every 60 s while
+# mTLS is on with an apiserver without doorbell (throttled inside)
+mtls_dir=/data/mtls
+mtls_mode=off
+mtls_reported=off
+if [ -f "${mtls_dir}/state.json" ]; then
+    mtls_mode=$(jq -r '.mode // "off"' "${mtls_dir}/state.json" 2>/dev/null || true)
+fi
+if [ -f "${mtls_dir}/reported_mode.json" ]; then
+    mtls_reported=$(jq -r '.mode // "off"' "${mtls_dir}/reported_mode.json" 2>/dev/null || true)
+fi
+if [ -f /tmp/pluggie_commands_pull ] \
+    || [ "${mtls_mode:-off}" != "${mtls_reported:-off}" ] \
+    || { [ -f /tmp/pluggie_commands_legacy ] && [ "${mtls_mode:-off}" != "off" ]; } \
+    || jq -e 'any(.events[]?; .acked == false)' "${mtls_dir}/remote_events.json" >/dev/null 2>&1; then
+    LOG_LEVEL="${log_level}" /usr/local/bin/mtls_remote.py poll \
+        || bashio::log.debug "Fetching commands failed"
 fi
 
 if [[ "${__BASHIO_LOG_LEVEL}" -ge "${__BASHIO_LOG_LEVEL_DEBUG}" ]]; then

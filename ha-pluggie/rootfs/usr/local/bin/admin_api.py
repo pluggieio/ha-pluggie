@@ -3,6 +3,7 @@
 import os
 import json
 import logging
+import re
 import sys
 import threading
 import time
@@ -11,7 +12,10 @@ import requests
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.parse
 from cert_verify import start_verification_thread, get_last_result, run_verification
+from doorbell import start_doorbell_thread
 from logger import setup_logging, reload_options_log_level
+import mtls
+import mtls_remote
 
 if os.environ.get("SUPERVISOR_TOKEN"):
     OPTIONS_FILE = "/ssl/pluggie/pluggie.json"
@@ -111,6 +115,18 @@ def _sanitize_options(payload):
     return sanitized
 
 
+_MTLS_REVOKE_RE = re.compile(r"\A/pluggie/api/mtls/clients/([0-9a-f]{16})/revoke\Z")
+_MTLS_MAX_BODY = 4096
+_RECOVERY_CODE_RE = re.compile(r"\A[A-Za-z0-9 -]{1,64}\Z")
+_RECOVERY_CODE_ERROR = "Enter the code you received from Pluggie support"
+
+
+def _mtls_view(status):
+    status["remote_notice"] = mtls_remote.remote_notice()
+    status["state_notice"] = mtls_remote.state_notice()
+    return status
+
+
 # Signal handler for reloading config
 def signal_handler(sig, frame):
     logging.info("Received signal to reload config")
@@ -140,6 +156,108 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-type', content_type)
         self.end_headers()
+
+
+    def _send_json(self, status, payload, no_store=False):
+        body = json.dumps(payload).encode()
+        self.send_response(status)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        if no_store:
+            self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+        self.wfile.write(body)
+
+
+    def _read_mtls_body(self):
+        # JSON-only: a cross-site form post cannot send this content type
+        # without a CORS preflight, which the admin API never answers.
+        content_type = self.headers.get('Content-Type', '').split(';')[0].strip()
+        if content_type != 'application/json':
+            raise mtls.MtlsError(415, "Content-Type must be application/json")
+        try:
+            length = int(self.headers.get('Content-Length', '0'))
+        except ValueError:
+            length = -1
+        if length < 0 or length > _MTLS_MAX_BODY:
+            raise mtls.MtlsError(400, "Invalid request body")
+        try:
+            payload = json.loads(self.rfile.read(length).decode('utf-8') or '{}')
+        except (ValueError, UnicodeDecodeError):
+            raise mtls.MtlsError(400, "Invalid JSON")
+        if not isinstance(payload, dict):
+            raise mtls.MtlsError(400, "Invalid JSON")
+        return payload
+
+
+    def _handle_mtls_post(self):
+        try:
+            if self.path == '/pluggie/api/mtls/mode':
+                payload = self._read_mtls_body()
+                status = mtls.set_mode(payload.get('mode'))
+                self._send_json(200, _mtls_view(status))
+            elif self.path == '/pluggie/api/mtls/clients':
+                payload = self._read_mtls_body()
+                client, filename, p12, password = mtls.add_client(payload.get('name'))
+                self._send_json(200, {
+                    "client": client,
+                    "filename": filename,
+                    "p12_base64": mtls.p12_base64(p12),
+                    "password": password,
+                }, no_store=True)
+            elif self.path == '/pluggie/api/mtls/reset':
+                payload = self._read_mtls_body()
+                status = mtls.reset(payload.get('confirm'))
+                self._send_json(200, _mtls_view(status))
+            elif self.path == '/pluggie/api/mtls/remote-notice/dismiss':
+                self._read_mtls_body()
+                mtls_remote.dismiss_notice()
+                self._send_json(200, _mtls_view(mtls.get_status()))
+            elif self.path == '/pluggie/api/mtls/state-notice/dismiss':
+                self._read_mtls_body()
+                mtls_remote.dismiss_state_notice()
+                self._send_json(200, _mtls_view(mtls.get_status()))
+            else:
+                match = _MTLS_REVOKE_RE.match(self.path)
+                if not match:
+                    self._send_json(404, {"error": "Not found"})
+                    return
+                self._read_mtls_body()
+                status = mtls.revoke_client(match.group(1))
+                self._send_json(200, _mtls_view(status))
+        except mtls.MtlsError as e:
+            self._send_json(e.status, {"error": e.message})
+        except BrokenPipeError:
+            logging.warning("Broken pipe error in mTLS endpoint")
+        except Exception as e:
+            logging.error(f"Error in mTLS endpoint: {type(e).__name__}")
+            try:
+                self._send_json(500, {"error": "Internal error"})
+            except BrokenPipeError:
+                pass
+
+
+    def _handle_ownership_proof(self):
+        try:
+            payload = self._read_mtls_body()
+            code = payload.get('code')
+            code = code.strip() if isinstance(code, str) else ''
+            if not _RECOVERY_CODE_RE.match(code):
+                self._send_json(400, {"error": _RECOVERY_CODE_ERROR})
+                return
+            result = mtls_remote.ownership_proof(code)
+            self._send_json(200, result, no_store=True)
+        except (mtls.MtlsError, mtls_remote.RemoteError) as e:
+            self._send_json(e.status, {"error": e.message}, no_store=True)
+        except BrokenPipeError:
+            logging.warning("Broken pipe error in ownership proof endpoint")
+        except Exception as e:
+            logging.error(
+                f"Error in ownership proof endpoint: {type(e).__name__}")
+            try:
+                self._send_json(500, {"error": "Internal error"})
+            except BrokenPipeError:
+                pass
 
 
     def do_OPTIONS(self):
@@ -461,6 +579,19 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         logging.warning("Broken pipe error while sending error response")
                         return
 
+            elif self.path == '/pluggie/api/mtls':
+                try:
+                    self._send_json(200, _mtls_view(mtls.get_status()))
+                except BrokenPipeError:
+                    logging.warning("Broken pipe error when returning mTLS status")
+                    return
+                except Exception as e:
+                    logging.error(f"Error reading mTLS status: {e}")
+                    try:
+                        self._send_json(500, {"error": "Internal error"})
+                    except BrokenPipeError:
+                        return
+
             elif self.path == '/pluggie/api/cert-verify':
                 try:
                     result = get_last_result()
@@ -483,7 +614,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 try:
                     result = run_verification()
                     from cert_verify import _save_result
-                    _save_result(result)
+                    # A postponed check keeps the last result
+                    if result.get("status") != "deferred":
+                        _save_result(result)
                     self._set_headers()
                     self.wfile.write(json.dumps(result).encode())
                 except BrokenPipeError:
@@ -668,6 +801,12 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         logging.warning("Broken pipe error while sending error response")
                         return
 
+            elif self.path.startswith('/pluggie/api/mtls/'):
+                self._handle_mtls_post()
+
+            elif self.path == '/pluggie/api/ownership-proof':
+                self._handle_ownership_proof()
+
             else:
                 try:
                     self.send_response(404)
@@ -699,12 +838,13 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
 
 
 def run(server_class=HTTPServer, handler_class=AdminAPIHandler, port=8000):
-    server_address = ('', port)
+    server_address = ('127.0.0.1', port)
     httpd = server_class(server_address, handler_class)
     logging.debug(f'Starting admin server on port {port}...')
 
     # Start certificate verification background thread
     start_verification_thread()
+    start_doorbell_thread()
 
     httpd.serve_forever()
 

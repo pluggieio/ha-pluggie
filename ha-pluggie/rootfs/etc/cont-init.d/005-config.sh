@@ -35,6 +35,10 @@ else
     PLUGGIE_DIR=/data
     user_agent="Pluggie-Client-Docker/${addon_version}"
     bashio::log.debug "Detected Docker environment"
+    if [ -r /proc/self/mountinfo ] \
+        && ! awk '$5 == "/data" { found = 1 } END { exit !found }' /proc/self/mountinfo; then
+        bashio::log.warning "/data is not a mounted directory: the access key, certificates and client certificates are lost when the container is recreated (for example on update). Mount a host directory on /data (see the documentation); client certificates cannot be turned on until then."
+    fi
 fi
 
 if ! bashio::fs.directory_exists "${PLUGGIE_DIR}"; then
@@ -186,6 +190,9 @@ EOF
 fi
 
 cat <<EOF >> "/etc/nginx/nginx.conf"
+    # Must precede the first map; mTLS map keys (SUCCESS:<sha1>) exceed the 64-byte default
+    map_hash_bucket_size 128;
+
     map \$http_upgrade \$connection_upgrade {
         default upgrade;
         '' close;
@@ -199,6 +206,12 @@ cat <<EOF >> "/etc/nginx/nginx.conf"
     include /etc/nginx/http.d/*.conf;
 }
 EOF
+
+# HA edition: admin interface only for the ingress proxy and loopback
+admin_access=""
+if [ "${is_ha_environment}" = true ]; then
+    admin_access="include /etc/nginx/pluggie-admin-ha.conf;"
+fi
 
 # /etc/nginx/http.d/default.conf
 cat <<EOF > "/etc/nginx/http.d/default.conf"
@@ -224,6 +237,7 @@ server {
     listen 8099 default_server;
     root /usr/local/www;
     index index.html;
+    ${admin_access}
 
     access_log off;
     error_log /dev/null;

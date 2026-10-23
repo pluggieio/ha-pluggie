@@ -24,7 +24,8 @@ check_dns() {
 
     bashio::log.debug "Checking ${hostname} using DNS ${dns_server}.." >&2
     local ip
-    ip=$(dig +short "${hostname}" A "@${dns_server}" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || echo "")
+    # Short timeouts: without internet the loop must not hang on retries
+    ip=$(dig +short +time=3 +tries=2 "${hostname}" A "@${dns_server}" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || echo "")
     bashio::log.debug "IP for ${hostname} from ${dns_server}: ${ip}" >&2
     echo "$ip"
 }
@@ -65,11 +66,45 @@ restart_wireguard() {
     fi
 }
 
+CONFIG_REFRESH_TRIGGER="/tmp/pluggie_config_refresh"
+CONFIG_CHECK_INTERVAL=900
+COMMANDS_PULL_REQUEST="/tmp/pluggie_commands_pull"
+
+# DNS is checked every DNS_CHECK_INTERVAL, after a failed tunnel health
+# check at once and then every DNS_RETRY_INTERVAL while it keeps failing
+# (the endpoint IP may have changed)
+DNS_CHECK_STAMP="/tmp/pluggie_dns_check"
+DNS_CHECK_INTERVAL=900
+DNS_RETRY_INTERVAL=120
+
+dns_check_due() {
+    local last now interval=${DNS_CHECK_INTERVAL}
+    [ "${vpn_restart_needed}" = true ] && return 0
+    if [ -f "${HEALTH_STATE}" ] && [ "$(cut -d' ' -f2 "${HEALTH_STATE}")" != "0" ]; then
+        interval=${DNS_RETRY_INTERVAL}
+    fi
+    last=$(stat -c %Y "${DNS_CHECK_STAMP}" 2>/dev/null || echo 0)
+    now=$(date +%s)
+    [ $(( now - last )) -ge "${interval}" ] || [ "${now}" -lt "${last}" ]
+}
+
+# Compare tunnel settings with the apiserver (GET, throttled); a change
+# requests a refresh via CONFIG_REFRESH_TRIGGER. Result in config_check_rc.
+check_remote_config() {
+    config_check_rc=0
+    /usr/local/bin/get_config.py --check --min-interval "${CONFIG_CHECK_INTERVAL}" || config_check_rc=$?
+}
+
 HEALTH_STATE="/tmp/pluggie_health"
 HEALTH_MAX_FAILS=2
 HEALTH_HANDSHAKE_MAX_AGE=180
+# With keepalive the session is renewed about every 2 minutes; a handshake
+# this recent proves the endpoint still has this peer, no ping needed
+HEALTH_HANDSHAKE_FRESH=170
 HEALTH_PING_ATTEMPTS=3
-HEALTH_BACKOFF=(60 120 240)
+# Reconnect attempts while the endpoint stays unreachable; WireGuard itself
+# recovers within seconds once packets flow again (roaming, keepalive)
+HEALTH_BACKOFF=(60 120 240 480 900)
 
 # Load health state: rx baseline, consecutive failures, health restarts, next allowed restart
 health_load() {
@@ -143,6 +178,15 @@ check_tunnel_health() {
     # Data received from the edge within a valid session
     if [ -n "${rx}" ] && [ "${rx}" -gt "${h_rx}" ] && [ -n "${age}" ] && [ "${age}" -lt "${HEALTH_HANDSHAKE_MAX_AGE}" ]; then
         h_rx=${rx}
+        h_fails=0
+        h_restarts=0
+        h_next=0
+        health_save
+        return 0
+    fi
+
+    if [ -n "${age}" ] && [ "${age}" -le "${HEALTH_HANDSHAKE_FRESH}" ]; then
+        h_rx=${rx:-${h_rx}}
         h_fails=0
         h_restarts=0
         h_next=0
@@ -258,7 +302,6 @@ PLUGGIE_DNS=$(bashio::config 'pluggie_config.dns')
 # Initialise variables
 HOSTNAME_IP=""
 CURRENT_ENDPOINT_IP=""
-CURRENT_API_IP=""
 
 vpn_restart_needed=false
 
@@ -292,69 +335,67 @@ if [ -z "$PLUGGIE_HOSTNAME" ] || [ -z "$PLUGGIE_ENDPOINT1_SHORT" ] || [ -z "$PLU
     fi
 fi
 
-# List of DNS servers to try (Cloudflare, Google, Quad9)
-dns_servers=("1.1.1.1" "8.8.8.8" "9.9.9.9")
+if dns_check_due; then
+    touch "${DNS_CHECK_STAMP}"
 
-# Try DNS servers in order
-for server in "${dns_servers[@]}"; do
-    # Check hostname IP
-    HOSTNAME_IP=$(check_dns "${PLUGGIE_HOSTNAME}" "$server")
-    if [ -n "${HOSTNAME_IP}" ]; then
-        bashio::log.debug "Valid hostname IP found: ${HOSTNAME_IP}"
+    # List of DNS servers to try (Cloudflare, Google, Quad9)
+    dns_servers=("1.1.1.1" "8.8.8.8" "9.9.9.9")
 
-        # Check endpoint IP
-        CURRENT_ENDPOINT_IP=$(check_dns "${PLUGGIE_ENDPOINT1_SHORT}" "$server")
-        if [ -n "${CURRENT_ENDPOINT_IP}" ]; then
-            bashio::log.debug "Valid Pluggie endpoint IP found: ${CURRENT_ENDPOINT_IP}"
+    # Try DNS servers in order
+    for server in "${dns_servers[@]}"; do
+        # Check hostname IP
+        HOSTNAME_IP=$(check_dns "${PLUGGIE_HOSTNAME}" "$server")
+        if [ -n "${HOSTNAME_IP}" ]; then
+            bashio::log.debug "Valid hostname IP found: ${HOSTNAME_IP}"
 
-            # Check API server using the same check_dns function
-            CURRENT_API_IP=$(check_dns "${PLUGGIE_APISERVER}" "$server")
-            if [ -n "${CURRENT_API_IP}" ]; then
-                bashio::log.debug "Valid API server IP found: ${CURRENT_API_IP}"
+            # Check endpoint IP
+            CURRENT_ENDPOINT_IP=$(check_dns "${PLUGGIE_ENDPOINT1_SHORT}" "$server")
+            if [ -n "${CURRENT_ENDPOINT_IP}" ]; then
+                bashio::log.debug "Valid Pluggie endpoint IP found: ${CURRENT_ENDPOINT_IP}"
                 break
             fi
         fi
+    done
+
+    # If all DNS checks failed
+    if [ -z "${HOSTNAME_IP}" ]; then
+        bashio::log.error "Error resolving hostname ${PLUGGIE_HOSTNAME}. No valid IPs found."
+        check_remote_config
+        # 'sleep 60' instead of 'exit 1' to keep running for case the DNS records will become valid again
+        bashio::log.info "Sleeping for 60 seconds to run loop again"
+        sleep 60
+        # exit 1
     fi
-done
 
-# If all DNS checks failed
-if [ -z "${HOSTNAME_IP}" ]; then
-    bashio::log.error "Error resolving hostname ${PLUGGIE_HOSTNAME}. No valid IPs found."
-    # 'sleep 60' instead of 'exit 1' to keep running for case the DNS records will become valid again
-    bashio::log.info "Sleeping for 60 seconds to run loop again"
-    sleep 60
-    # exit 1
-fi
-
-if [ -z "${CURRENT_ENDPOINT_IP}" ]; then
-    bashio::log.error "Error resolving Pluggie endpoints. No valid IPs found. Keeping WireGuard up with old DNS records."
-    # 'sleep 60' instead of 'exit 1' to keep running for case the DNS records will become valid again
-    bashio::log.info "Sleeping for 60 seconds to run loop again"
-    sleep 60
-    # exit 1
-fi
-
-if [ -z "${CURRENT_API_IP}" ]; then
-    bashio::log.error "Error resolving Pluggie API server. No valid IPs found. Keeping WireGuard up with old DNS records."
-    # 'sleep 60' instead of 'exit 1' to keep running for case the DNS records will become valid again
-    bashio::log.info "Sleeping for 60 seconds to run loop again"
-    sleep 60
-    # exit 1
+    if [ -z "${CURRENT_ENDPOINT_IP}" ]; then
+        bashio::log.error "Error resolving Pluggie endpoints. No valid IPs found. Keeping WireGuard up with old DNS records."
+        # 'sleep 60' instead of 'exit 1' to keep running for case the DNS records will become valid again
+        bashio::log.info "Sleeping for 60 seconds to run loop again"
+        sleep 60
+        # exit 1
+    fi
 fi
 
 bashio::log.debug "HOSTNAME_IP: ${HOSTNAME_IP}" >&2
-bashio::log.debug "CURRENT_API_IP: ${CURRENT_API_IP}" >&2
 bashio::log.debug "CURRENT_ENDPOINT_IP: ${CURRENT_ENDPOINT_IP}" >&2
 bashio::log.debug "PLUGGIE_ENDPOINT1_IP: ${PLUGGIE_ENDPOINT1_IP}" >&2
 bashio::log.debug "PLUGGIE_INTERFACE1: ${PLUGGIE_INTERFACE1}" >&2
 
-# Check if hostname or endpoint IP changed
+# Hostname not pointing to the endpoint: hostname or endpoint changed in the
+# Pluggie account (refresh below) or a DNS problem (keep running)
 if [ -n "${HOSTNAME_IP}" ] && [ -n "${CURRENT_ENDPOINT_IP}" ] && [ "${HOSTNAME_IP}" != "${CURRENT_ENDPOINT_IP}" ]; then
-    bashio::log.error "Hostname IP (${HOSTNAME_IP}) does not match endpoint IP (${CURRENT_ENDPOINT_IP})"
-    bashio::log.info "Waiting for DNS propagation. Sleeping for 60 seconds to run loop again"
+    check_remote_config
+    case "${config_check_rc}" in
+        0) bashio::log.warning "Hostname ${PLUGGIE_HOSTNAME} resolves to ${HOSTNAME_IP}, not to the Pluggie endpoint (${CURRENT_ENDPOINT_IP}). Please check DNS." ;;
+        3) ;;
+        *) bashio::log.debug "Hostname IP (${HOSTNAME_IP}) does not match endpoint IP (${CURRENT_ENDPOINT_IP})" ;;
+    esac
+fi
+
+# Refresh requested by get_config.py --check, cert_verify.py or mtls_remote.py
+if [ -f "${CONFIG_REFRESH_TRIGGER}" ]; then
+    rm -f "${CONFIG_REFRESH_TRIGGER}"
     vpn_restart_needed=true
-    # sleep 60
-    exit 1
 fi
 
 # Check if endpoint IP changed
@@ -456,6 +497,7 @@ elif [ "${health_rc}" -eq 0 ]; then
         bashio::log.info "Connectivity restored, updating state to enabled."
         echo "enabled" > "/etc/pluggie.state"
         touch /tmp/cert_verify_trigger
+        [ -f "${COMMANDS_PULL_REQUEST}" ] || echo 0 > "${COMMANDS_PULL_REQUEST}"
     fi
 fi
 

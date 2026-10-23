@@ -16,4 +16,6 @@ else
 fi
 
 # clean environment
-rm -f /etc/pluggie.state /tmp/restart_reason /tmp/pluggie_health /tmp/pluggie_cert_busy
+rm -f /etc/pluggie.state /tmp/restart_reason /tmp/pluggie_health /tmp/pluggie_cert_busy \
+    /tmp/pluggie_dns_check /tmp/pluggie_mtls_poll /tmp/pluggie_commands_pull \
+    /tmp/pluggie_commands_legacy /tmp/cert_verify_reported.json
