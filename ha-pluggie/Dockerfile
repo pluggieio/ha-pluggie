@@ -18,6 +18,9 @@ ARG ACME_VERSION
 # WireGuard
 ARG WIREGUARDTOOLS_VERSION
 
+# nginx
+ARG NGINX_VERSION
+
 # Container version
 ENV PLUGGIE_VERSION=${BUILD_VERSION}
 
@@ -33,8 +36,8 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN set -x \
     && apk add --no-cache \
         wireguard-tools \
-        nginx \
-        nginx-mod-http-brotli \
+        nginx~${NGINX_VERSION} \
+        nginx-mod-http-brotli~${NGINX_VERSION} \
         apache2-utils \
         openresolv \
         openssl \

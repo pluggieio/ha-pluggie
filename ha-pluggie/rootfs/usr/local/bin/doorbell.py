@@ -12,9 +12,11 @@ import ipaddress
 import json
 import logging
 import os
+import random
 import re
 import socket
 import struct
+import subprocess
 import threading
 import time
 
@@ -24,6 +26,9 @@ OPTIONS_FILE = "/data/pluggie.json"
 WG_CONFIG_DIR = "/etc/wireguard"
 DOORBELL_PORT = 54004
 PAYLOAD_PREFIX = b"pluggie-doorbell"
+REBIND_PREFIX = b"pluggie-rebind"
+REBIND_MIN_INTERVAL = 30
+_last_rebind = [None]
 RECV_TIMEOUT = 60
 RETRY_DELAY = 10
 
@@ -58,7 +63,7 @@ def accepted(data, ancdata, address, interface, edge_ip):
     """True for a doorbell from the endpoint received on the tunnel."""
     if not address or address[0] != edge_ip:
         return False
-    if not data.startswith(PAYLOAD_PREFIX):
+    if not data.startswith((PAYLOAD_PREFIX, REBIND_PREFIX)):
         return False
     for level, kind, value in ancdata:
         if (level == socket.IPPROTO_IP and kind == _IP_PKTINFO
@@ -97,7 +102,28 @@ def ring(wait=time.sleep):
                       f"{type(exc).__name__}")
 
 
-def serve(stop=None, on_ring=ring, port=DOORBELL_PORT):
+def rebind(interface, edge_ip, on_ring=ring, now=time.monotonic):
+    """Move WireGuard to a new local UDP port; the NAT creates a new mapping."""
+    if (_last_rebind[0] is not None
+            and now() - _last_rebind[0] < REBIND_MIN_INTERVAL):
+        return False
+    _last_rebind[0] = now()
+    port = random.randint(49152, 65535)
+    result = subprocess.run(["wg", "set", interface, "listen-port", str(port)],
+                            capture_output=True, check=False)
+    if result.returncode != 0:
+        logging.error("Doorbell: moving WireGuard to a new UDP port failed")
+        return False
+    logging.warning(f"Pluggie endpoint asked for a new UDP port, "
+                    f"WireGuard moved to {port}")
+    # First packet from the new port, so the endpoint switches at once
+    subprocess.run(["ping", "-c", "1", "-W", "1", edge_ip],
+                   capture_output=True, check=False)
+    on_ring()
+    return True
+
+
+def serve(stop=None, on_ring=ring, port=DOORBELL_PORT, on_rebind=None):
     stop = stop or threading.Event()
     warned = False
     while not stop.is_set():
@@ -134,8 +160,11 @@ def serve(stop=None, on_ring=ring, port=DOORBELL_PORT):
                 if not accepted(data, ancdata, address, interface, edge_ip):
                     logging.debug("Doorbell: ignored a datagram")
                     continue
-                logging.debug("Doorbell rang, fetching commands")
-                on_ring()
+                if data.startswith(REBIND_PREFIX):
+                    (on_rebind or rebind)(interface, edge_ip)
+                else:
+                    logging.debug("Doorbell rang, fetching commands")
+                    on_ring()
                 if tunnel_params() != params:
                     break
 

@@ -98,9 +98,9 @@ check_remote_config() {
 HEALTH_STATE="/tmp/pluggie_health"
 HEALTH_MAX_FAILS=2
 HEALTH_HANDSHAKE_MAX_AGE=180
-# With keepalive the session is renewed about every 2 minutes; a handshake
-# this recent proves the endpoint still has this peer, no ping needed
-HEALTH_HANDSHAKE_FRESH=170
+# With keepalive the session is renewed every 120-145s; a handshake this
+# recent proves the endpoint still has this peer, older ones are probed
+HEALTH_HANDSHAKE_FRESH=130
 HEALTH_PING_ATTEMPTS=3
 # Reconnect attempts while the endpoint stays unreachable; WireGuard itself
 # recovers within seconds once packets flow again (roaming, keepalive)
@@ -144,6 +144,14 @@ wg_handshake_age() {
     ts=$(wg show "${PLUGGIE_INTERFACE1}" latest-handshakes 2>/dev/null | awk 'NR==1 {print $2}' || true)
     if [ -n "${ts}" ] && [ "${ts}" -gt 0 ]; then
         echo $(( $(date +%s) - ts ))
+    fi
+}
+
+# A new local UDP port gets a new NAT mapping, the WireGuard session stays
+wg_rebind_port() {
+    local port=$(( 49152 + RANDOM % 16384 ))
+    if wg set "${PLUGGIE_INTERFACE1}" listen-port "${port}" 2>/dev/null; then
+        bashio::log.warning "Tunnel health: WireGuard moved to local UDP port ${port}"
     fi
 }
 
@@ -196,7 +204,7 @@ check_tunnel_health() {
 
     # Probe the edge, stop at the first reply that also increased rx
     for i in $(seq 1 "${HEALTH_PING_ATTEMPTS}"); do
-        if ping -q -c 1 -W 2 "${PLUGGIE_ENDPOINT1_IP_INT}" >/dev/null 2>&1; then
+        if ping -q -c 1 -s 0 -W 2 "${PLUGGIE_ENDPOINT1_IP_INT}" >/dev/null 2>&1; then
             replies=$(( replies + 1 ))
             rx_after=$(wg_rx_bytes)
             if [ -n "${rx}" ] && [ -n "${rx_after}" ] && [ "${rx_after}" -gt "${rx}" ]; then
@@ -217,6 +225,7 @@ check_tunnel_health() {
 
     if [ "${h_fails}" -lt "${HEALTH_MAX_FAILS}" ]; then
         health_save
+        wg_rebind_port
         return 1
     fi
 

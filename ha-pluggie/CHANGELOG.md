@@ -1,3 +1,13 @@
+## v0.8.1
+
+- the connection repairs itself when your internet provider's NAT (e.g. CGNAT) starts dropping most packets: Pluggie asks the app to move to a new UDP port, without a restart
+- a broken connection is noticed sooner and first repaired by moving to a new UDP port; the connection is restarted only if that does not help
+
+- bump versions:
+  - nginx 1.30.6 --> 1.30.7
+  - certbot 5.8.0 --> 5.10.0
+
+
 ## v0.8.0
 
 - optional client certificates (mTLS): Off / Test / Enforce, one certificate per device, revocable; local access is never affected

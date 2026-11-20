@@ -7,6 +7,7 @@ Pluggie (https://pluggie.io/) provides secure Internet access to devices behind 
 
 
 ## Features
+
 - Zero knowledge about your traffic which is fully encrypted between your Home Assistant and you (or your clients). Pluggie servers just pass traffic.
 - NO traffic decryption/encryption on Pluggie servers at all; only necessary info such as SNI is required to route traffic.
 - SSL/TLS certificate issuing via Let's Encrypt is done on your Home Assistant.

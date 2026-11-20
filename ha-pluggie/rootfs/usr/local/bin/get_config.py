@@ -87,7 +87,7 @@ def load_or_generate_keypair(pluggie_dir):
 
 DEFAULT_APISERVER = "api.pluggie.net"
 # capabilities announced to the apiserver (see tunnel capabilities)
-ADDON_CAPABILITIES = ["proxy_protocol", "mtls", "doorbell"]
+ADDON_CAPABILITIES = ["proxy_protocol", "mtls", "doorbell", "rebind"]
 OPTIONS_FILE = "/data/pluggie.json"
 CONFIG_CHECK_STAMP = "/tmp/pluggie_config_check"
 CONFIG_REFRESH_TRIGGER = "/tmp/pluggie_config_refresh"
