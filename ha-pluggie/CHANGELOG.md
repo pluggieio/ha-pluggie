@@ -1,3 +1,9 @@
+## v0.8.2
+
+- bump versions:
+  - nginx 1.30.7 --> 1.30.8
+
+
 ## v0.8.1
 
 - the connection repairs itself when your internet provider's NAT (e.g. CGNAT) starts dropping most packets: Pluggie asks the app to move to a new UDP port, without a restart
